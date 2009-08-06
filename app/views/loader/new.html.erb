@@ -1,0 +1,195 @@
+<h1>Import tasks</h1>
+<script language="javascript" type="text/javascript">
+    function check_box_toggle_field(id, className, prefix, suffix){
+        if (!$$) 
+            return;
+        
+        var doc = '<select id="' + id + '">' +
+        '<option disabled="disabled" selected="selected">Selections...</option>' +
+        '<option>Select all</option>' +
+        '<option>Select none</option>' +
+        '<option>Invert selection</option>' +
+        '</select>';
+        
+        if (prefix) 
+            doc = prefix + doc;
+        if (suffix) 
+            doc = doc + suffix;
+        
+        document.write(doc);
+        
+        var list = document.getElementById(id);
+        if (!list) 
+            return;
+        
+        new SelectionHandler(list, className);
+    }
+    
+    /* Object which handles selection list changes; by using an object, extra
+     * information can be carried through by an event and the EventListener
+     * interface.
+     */
+    function SelectionHandler(list, className){
+        this.list = list;
+        this.className = className;
+        
+        list.addEventListener('change', this, false);
+    }
+    
+    /* Handle changes in the selection list */
+    
+    SelectionHandler.prototype.handleEvent = function(event){
+        /* Perform the relevant action on the check boxes */
+        
+        $$('input.' + this.className).each(function(box){
+            switch (event.currentTarget.selectedIndex) {
+                case 1:
+                    box.checked = true;
+                    break;
+                case 2:
+                    box.checked = false;
+                    break;
+                case 3:
+                    box.checked = !box.checked;
+                    break;
+            }
+        });
+        
+        /* Restore the default selected item in the list */
+        
+        event.currentTarget.options[0].selected = true;
+    }
+</script>
+<% form_for( :import, { :url => { :action => 'create' }, :html => { :id => 'import', :multipart => true } } ) do | f | %>
+<% if ( @import.nil? or @import.tasks.nil? or @import.tasks.empty? ) -%>
+<p>
+    This plugin can import data from XML format project management files which
+    were created by applications such as OpenProj or Microsoft Project.
+</p>
+<p>
+    Any tasks with non-zero work time assigned are included. This plugin task
+    names are generated from the name of each XML file task, with the name of
+    the most immediate grouping parent summary added as a prefix. Assigned work
+    time in the XML data is converted to project durations in hours,
+    mathematically rounded to two decimal places if need be. Task codes are
+    created from the current date and the task ID, this being typically directly
+    related to position in which the task is listed in most graphical project
+    plan editors. Tasks are imported "flat" since This plugin does not support
+    hierarchical task structures.
+</p>
+<p>
+    To import tasks, choose an XML file stored locally on your computer using
+    the button below, then use the "Analyse" button to upload the file. Please
+    be patient - XML project files can be very large and may take a while to
+    upload and analyse. You can GZip the XML file and upload that instead to
+    save on upload time if you are working with low bandwidth.
+</p>
+<p>
+    When analysis is complete, a summary of the tasks that have been found will
+    be presented, allowing you to control exactly which tasks are imported.
+</p>
+<% else -%>
+<p>
+    The tasks found in the file are listed below. Only items with a ticked check
+    box next to them will be imported. Once happy with your selection, use the
+    "Import" button to begin the import process. To abandon the import, use the
+    "Cancel" link or choose a different file for analysis and use the "Analyse"
+    button to begin the upload and analysis process again.
+</p>
+<p>
+    The drop-down menu below the task list lets you select a project to which
+    all tasks will be assigned. The default value selected is chosen according
+    to your account settings.
+</p>
+<table border="0" cellspacing="0" cellpadding="2" align="center" class="bulk_task_import">
+    <tr valign="middle" align="center" class="info">
+        <th align="left">
+            &nbsp;Name
+        </th>
+        <th>
+            &nbsp;Start Date&nbsp;
+        </th>
+        <th>
+            &nbsp;End Date&nbsp;
+        </th>
+        <th>
+            &nbsp;Duration&nbsp;
+        </th>
+        <th>
+            &nbsp;Outline&nbsp;
+            <br/>
+            level
+        </th>
+        <th>
+            &nbsp;Import?&nbsp;
+        </th>
+    </tr>
+    <% titles = {}
+    dupes  = 0
+    @import.tasks.each do | task |
+    if ( titles[ task.title ] == true )
+    dupes += 1
+    titles[ task.title ] = dupes
+    elsif ( titles[ task.title ].nil? )
+    titles[ task.title ] = true
+    end
+    end
+    index = -1
+    @import.tasks.each do | task |
+    index += 1 -%>
+    <tr valign="top" align="center" class="<%= cycle( 'even', 'odd' ) -%>">
+        <td align="left" class="task_title">
+            <%= titles[ task.title ] != true ? "<span class=\"dup\">#{ titles[ task.title] }:</span>" : '&nbsp;' %>
+            <%= text_field_tag( "import[tasks][#{ index }][title]", h( task.title ), { :size => 50, :class => 'task_title' } ) %>
+            &nbsp;
+        </td>
+        <td align="left">
+            <%= text_field_tag( "import[tasks][#{ index }][start]", h( task.start ), { :size => 10 } ) %>
+        </td>
+        <td align="left">
+            <%= text_field_tag( "import[tasks][#{ index }][finish]", h( task.finish ), { :size => 10 } ) %>
+        </td>
+        <td>
+            <%= text_field_tag( "import[tasks][#{ index }][duration]", h( task.duration ), { :maxlength => 6, :size => 6 } ) %>
+        </td>
+        <td>
+            <%= hidden_field_tag( "import[tasks][#{ index }][level]", h( task.level ) ) %>
+            <%= h( task.level ) %>
+        </td>
+        <td>
+            <%= check_box_tag( "import[tasks][#{ index }][import]", '1', true, { :class => 'checkbox' } ) %>
+        </td>
+    </tr>
+    <% end -%>
+    <tr>
+        <td colspan="5" align="right">
+            <%= loaderhelp_project_selector( f ) %>
+        </td>
+    </tr>
+    <tr>
+        <td align="right" colspan="5">
+            <script language="javascript" type="text/javascript">
+                check_box_toggle_field('toggle_check_boxes', 'checkbox', 'Select tasks&nbsp;', '&nbsp;then');
+            </script>
+            <%= f.submit( 'Import selected tasks', { :name => 'import[import_selected]' } ) %>
+        </td>
+    </tr>
+    <% if ( dupes > 0 ) -%>
+    <tr>
+        <td align="right" colspan="5">
+            <strong>Warning!</strong>
+            Some task titles are identical. You need to rename them if importing. If you see a '500' Server error - you may have missed one.
+        </td>
+    </tr>
+    <% end -%>
+</table>
+<p>
+    Alternatively, ignore the above tasks and analyse a different file:
+</p>
+<% end -%>
+<%= f.file_field 'xmlfile' %>
+<%= f.submit( 'Analyse', { :name => 'import[analyse]', :disable_with => 'Analysing...' } ) %>
+<% end %>
+<p>
+    <%= link_to( 'Cancel and return home', home_path() ) %>
+</p>
