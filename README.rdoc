@@ -8,3 +8,7 @@ My first attempt at hacking some ruby together. Probably full of stupid stuff, b
 Essentially, and largely through the miracle of cut and paste, I took code from an open source app called trackrecord and reworked this as a Redmine plugin.
 
 Supports XML files output by MS Project etc and does a simple load into a default tracker for the selected project.
+
+
+Developed under Mac OS X.  Tested on linux (fedora 11).
+
