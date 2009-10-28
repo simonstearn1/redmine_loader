@@ -103,6 +103,9 @@
 </p>
 <table border="0" cellspacing="0" cellpadding="2" align="center" class="bulk_task_import">
     <tr valign="middle" align="center" class="info">
+        <th>
+            &nbsp;UID&nbsp;
+        </th>
         <th align="left">
             &nbsp;Name
         </th>
@@ -116,10 +119,16 @@
             &nbsp;Duration&nbsp;
         </th>
         <th>
+            &nbsp;%&nbsp;
+        </th>
+        <th>
             &nbsp;Outline&nbsp;
             <br/>
             level
         </th>
+		<th>
+		    &nbsp;Requires&nbsp;
+	    </th>
         <th>
             &nbsp;Import?&nbsp;
         </th>
@@ -138,6 +147,10 @@
     @import.tasks.each do | task |
     index += 1 -%>
     <tr valign="top" align="center" class="<%= cycle( 'even', 'odd' ) -%>">
+        <td>
+            <%= hidden_field_tag( "import[tasks][#{ index }][uid]", h( task.uid ) ) %>
+            <%= h( task.uid ) %>
+        </td>
         <td align="left" class="task_title">
             <%= titles[ task.title ] != true ? "<span class=\"dup\">#{ titles[ task.title] }:</span>" : '&nbsp;' %>
             <%= text_field_tag( "import[tasks][#{ index }][title]", h( task.title ), { :size => 50, :class => 'task_title' } ) %>
@@ -152,9 +165,16 @@
         <td>
             <%= text_field_tag( "import[tasks][#{ index }][duration]", h( task.duration ), { :maxlength => 6, :size => 6 } ) %>
         </td>
+        <td align="left">
+            <%= text_field_tag( "import[tasks][#{ index }][percentcomplete]", h( task.percentcomplete ), { :size => 3 } ) %>
+        </td>
         <td>
             <%= hidden_field_tag( "import[tasks][#{ index }][level]", h( task.level ) ) %>
             <%= h( task.level ) %>
+        </td>
+        <td>
+            <%= hidden_field_tag( "import[tasks][#{ index }][predecessors]", h( task.predecessors.join(', ') ) ) %>
+            <%= h( task.predecessors.join(', ') ) %>
         </td>
         <td>
             <%= check_box_tag( "import[tasks][#{ index }][import]", '1', true, { :class => 'checkbox' } ) %>

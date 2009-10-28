@@ -6,6 +6,14 @@
 #          Feb 2009 (SJS): Hacked into plugin for redmine              #
 ########################################################################
 
+# Moved here because we were having trouble importing it.
+class TaskImport
+  @tasks      = []
+  @project_id = nil
+
+  attr_accessor( :tasks, :project_id )
+end
+
 class LoaderController < ApplicationController
   
   unloadable
@@ -30,13 +38,13 @@ class LoaderController < ApplicationController
   def create
     
     # Set up a new TaskImport session object and read the XML file details
-    
+	
     xmlfile = params[ :import ][ :xmlfile ]
     @import = TaskImport.new
     #@import.project_id = @current_user.control_panel.project_id
-    
+    	
     if ( xmlfile != '' )
-      
+
       # The user selected a file to upload, so process it
       
       begin
@@ -111,6 +119,9 @@ class LoaderController < ApplicationController
         struct.duration = task[ :duration ]
         struct.start = task[ :start ]
         struct.finish = task[ :finish ]
+        struct.percentcomplete = task[ :percentcomplete ]
+        struct.predecessors = task[ :predecessors ].split(', ')
+        struct.uid = task[ :uid ]
         
         @import.tasks[ index ] = struct
         to_import[ index ] = struct if ( task[ :import ] == '1' )
@@ -153,31 +164,51 @@ class LoaderController < ApplicationController
         return
       end
       
+      # We're going to keep track of new issue ID's to make dependencies work later
+      uidToIssueIdMap = {}
+      
       # Right, good to go! Do the import.
+  
       begin
         Issue.transaction do
           to_import.each do | source_issue |
             destination_issue          = Issue.new do |i|
               i.tracker_id = default_tracker_id
-              i.subject    = source_issue.title
+              i.subject    = source_issue.title.slice(0, 255) # Max length of this field is 255
               i.estimated_hours = source_issue.duration
               i.project_id  = project_id
-              i.author_id = User.current
+              i.author_id = User.current.id
               i.lock_version = 0
-              i.done_ratio = 0
+              i.done_ratio = source_issue.percentcomplete
               i.description = source_issue.title
               i.start_date = source_issue.start
               i.due_date = source_issue.finish unless source_issue.finish.nil?
               i.due_date = (Date.parse(source_issue.start, false) + ((source_issue.duration.to_f/40.0)*7.0).to_i).to_s unless i.due_date != nil
-              i.private = 1
             end	
             # Date.parse(start, false, start)+100
             destination_issue.save!
+            
+            # Now that we know this issue's Redmine issue ID, save it off for later
+            uidToIssueIdMap[ source_issue.uid ] = destination_issue.id
           end
           
           flash[ :notice ] = "#{ to_import.length } #{ to_import.length == 1 ? 'task' : 'tasks' } imported successfully."
         end
         
+        # Handle all the dependencies
+        IssueRelation.transaction do
+          to_import.each do | source_issue |
+            source_issue.predecessors.each do | parent_uid |
+                relation_record = IssueRelation.new do |i|
+                  i.issue_from_id = uidToIssueIdMap[parent_uid]
+                  i.issue_to_id = uidToIssueIdMap[source_issue.uid]
+                  i.relation_type = 'precedes'
+                end
+                relation_record.save!
+            end
+          end
+        end
+    
         redirect_to( '/loader/new' )
         
         
@@ -212,10 +243,20 @@ class LoaderController < ApplicationController
         struct.level  = task.get_elements( 'OutlineLevel' )[ 0 ].text.to_i
         struct.tid    = task.get_elements( 'ID'           )[ 0 ].text.to_i
         struct.uid    = task.get_elements( 'UID'          )[ 0 ].text.to_i
-        struct.title  = task.get_elements( 'Name'         )[ 0 ].text
+        struct.title  = task.get_elements( 'Name'         )[ 0 ].text.strip
         struct.start  = task.get_elements( 'Start'        )[ 0 ].text.split("T")[0]
         
         struct.finish  = task.get_elements( 'Finish'        )[ 0 ].text.split("T")[0] unless task.get_elements( 'Finish')[ 0 ].nil?
+        struct.percentcomplete = task.get_elements( 'PercentComplete')[0].text.to_i
+
+        # Handle dependencies
+        struct.predecessors = []
+        task.each_element( 'PredecessorLink' ) do | predecessor |
+          begin
+            struct.predecessors.push( predecessor.get_elements('PredecessorUID')[0].text.to_i )
+          end
+        end
+          
         tasks.push( struct )
       rescue
         # Ignore errors; they tend to indicate malformed tasks, or at least,
@@ -235,17 +276,17 @@ class LoaderController < ApplicationController
     # blank out the task from the array. Otherwise, use whatever
     # summary name was most recently found (if any) as a name prefix.
     
-    prefix = ''
+    category = ''
     
     tasks.each_index do | index |
       task      = tasks[ index     ]
       next_task = tasks[ index + 1 ]
       
       if ( next_task and next_task.level > task.level )
-        prefix         = task.title
+        category         = task.title
         tasks[ index ] = nil
       else
-        task.title = "#{ prefix }: #{ task.title }" unless prefix.empty?
+        task.category = category
       end
     end
     
