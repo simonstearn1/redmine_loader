@@ -11,6 +11,7 @@
 class TaskImport
   @tasks      = []
   @project_id = nil
-
-  attr_accessor( :tasks, :project_id )
+  @new_categories = []
+  
+  attr_accessor( :tasks, :project_id, :new_categories )
 end

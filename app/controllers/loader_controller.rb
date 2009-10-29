@@ -6,18 +6,20 @@
 #          Feb 2009 (SJS): Hacked into plugin for redmine              #
 ########################################################################
 
-# Moved here because we were having trouble importing it.
 class TaskImport
   @tasks      = []
   @project_id = nil
-
-  attr_accessor( :tasks, :project_id )
+  @new_categories = []
+  
+  attr_accessor( :tasks, :project_id, :new_categories )
 end
 
 class LoaderController < ApplicationController
   
   unloadable
-  
+
+  before_filter :find_project, :authorize, :only => [:new, :create]  
+
   require 'zlib'
   require 'ostruct'
   require 'tempfile'
@@ -28,6 +30,9 @@ class LoaderController < ApplicationController
   # preliminary task list), then this is included too.
   
   def new
+    # This can and probably SHOULD be replaced with some URL rewrite magic
+    # now that the project loader is Redmine project based.
+    find_project()
   end
   
   # Take the task data from the 'new' view form and 'create' an "import
@@ -36,13 +41,15 @@ class LoaderController < ApplicationController
   # whole operation can be unwound in case of error.
   
   def create
-    
+    # This can and probably SHOULD be replaced with some URL rewrite magic
+    # now that the project loader is Redmine project based.
+    find_project()
+
     # Set up a new TaskImport session object and read the XML file details
-	
+    
     xmlfile = params[ :import ][ :xmlfile ]
     @import = TaskImport.new
-    #@import.project_id = @current_user.control_panel.project_id
-    	
+        
     if ( xmlfile != '' )
 
       # The user selected a file to upload, so process it
@@ -58,8 +65,8 @@ class LoaderController < ApplicationController
         
         xmlfile       = Zlib::GzipReader.new( xmlfile ) if ( byte != '<'[ 0 ] )
         xmldoc        = REXML::Document.new( xmlfile.read() )
-        @import.tasks = get_tasks_from_xml( xmldoc )
-        
+        @import.tasks, @import.new_categories = get_tasks_from_xml( xmldoc )
+
         if ( @import.tasks.nil? or @import.tasks.empty? )
           flash[ :error  ] = 'No usable tasks were found in that file'
         else
@@ -75,7 +82,7 @@ class LoaderController < ApplicationController
         lines = error.message.split("\n")
         flash[ :error  ] = "Failed to read file: #{ lines[ 0 ] }"
       end
-      
+
       render( { :action => :new } )
       flash.delete( :error  )
       flash.delete( :notice )
@@ -101,6 +108,7 @@ class LoaderController < ApplicationController
       # case of error.
       
       @import.tasks = []
+      @import.new_categories = []
       to_import     = []
       
       # Due to the way the form is constructed, 'task' will be a 2-element
@@ -112,7 +120,8 @@ class LoaderController < ApplicationController
         index  = taskinfo[ 0 ].to_i
         task   = taskinfo[ 1 ]
         struct = OpenStruct.new
-        
+
+        struct.uid = task[ :uid ]        
         struct.title    = task[ :title    ]
         struct.level    = task[ :level    ]
         struct.code     = task[ :code     ]
@@ -121,7 +130,8 @@ class LoaderController < ApplicationController
         struct.finish = task[ :finish ]
         struct.percentcomplete = task[ :percentcomplete ]
         struct.predecessors = task[ :predecessors ].split(', ')
-        struct.uid = task[ :uid ]
+        struct.category = task[ :category ]
+        struct.assigned_to = task[ :assigned_to ]
         
         @import.tasks[ index ] = struct
         to_import[ index ] = struct if ( task[ :import ] == '1' )
@@ -144,15 +154,13 @@ class LoaderController < ApplicationController
         flash[ :error ] = 'No tasks were selected for import. Please select at least one task and try again.'
       end
       
-      project_id = params[ :import ][ :project_id ]
-      
       # Get defaults to use for all tasks - sure there is a nicer ruby way, but this works
       #
       # Tracker
       default_tracker_name = Setting.plugin_redmine_loader['tracker']
       default_tracker = Tracker.find(:first, :conditions => [ "name = ?", default_tracker_name])
       default_tracker_id = default_tracker.id
-      
+
       if ( default_tracker_id.nil? )
         flash[ :error ] = 'No valid default Tracker. Please ask your System Administrator to resolve this.'
       end
@@ -166,17 +174,31 @@ class LoaderController < ApplicationController
       
       # We're going to keep track of new issue ID's to make dependencies work later
       uidToIssueIdMap = {}
-      
+
       # Right, good to go! Do the import.
-  
       begin
         Issue.transaction do
           to_import.each do | source_issue |
+
+            # Add the category entry if necessary
+            category_entry = IssueCategory.find :first, :conditions => { :project_id => @project.id, :name => source_issue.category }
+
+            if (category_entry.nil?)
+              # Need to create it
+              category_entry = IssueCategory.new do |i|
+                i.name = source_issue.category
+                i.project_id = @project.id
+              end
+
+              category_entry.save!
+            end
+
             destination_issue          = Issue.new do |i|
               i.tracker_id = default_tracker_id
+              i.category_id = category_entry.id
               i.subject    = source_issue.title.slice(0, 255) # Max length of this field is 255
               i.estimated_hours = source_issue.duration
-              i.project_id  = project_id
+              i.project_id = @project.id
               i.author_id = User.current.id
               i.lock_version = 0
               i.done_ratio = source_issue.percentcomplete
@@ -184,8 +206,13 @@ class LoaderController < ApplicationController
               i.start_date = source_issue.start
               i.due_date = source_issue.finish unless source_issue.finish.nil?
               i.due_date = (Date.parse(source_issue.start, false) + ((source_issue.duration.to_f/40.0)*7.0).to_i).to_s unless i.due_date != nil
-            end	
-            # Date.parse(start, false, start)+100
+
+              if ( source_issue.assigned_to != "" )
+                i.assigned_to_id = source_issue.assigned_to
+                i.status_id = IssueStatus.find_by_name("Assigned").id
+              end
+            end
+
             destination_issue.save!
             
             # Now that we know this issue's Redmine issue ID, save it off for later
@@ -195,21 +222,24 @@ class LoaderController < ApplicationController
           flash[ :notice ] = "#{ to_import.length } #{ to_import.length == 1 ? 'task' : 'tasks' } imported successfully."
         end
         
-        # Handle all the dependencies
+        # Handle all the dependencies being careful if the parent doesn't exist
         IssueRelation.transaction do
           to_import.each do | source_issue |
             source_issue.predecessors.each do | parent_uid |
+              if ( uidToIssueIdMap.has_key?(parent_uid) )
+                # Parent is being imported also.  Go ahead and add the association
                 relation_record = IssueRelation.new do |i|
                   i.issue_from_id = uidToIssueIdMap[parent_uid]
                   i.issue_to_id = uidToIssueIdMap[source_issue.uid]
                   i.relation_type = 'precedes'
                 end
                 relation_record.save!
+              end
             end
           end
         end
     
-        redirect_to( '/loader/new' )
+        redirect_to( "/projects/#{@project}/issues" )
         
         
       rescue => error
@@ -224,10 +254,10 @@ class LoaderController < ApplicationController
   private
   
   # Is the current action permitted?
-  
-  def permitted?
-    #    appctrl_not_permitted() if( @current_user.restricted? )
-    true
+
+  def find_project
+    # @project variable must be set before calling the authorize filter
+    @project = Project.find(params[:project_id])
   end
   
   # Obtain a task list from the given parsed XML data (a REXML document).
@@ -275,7 +305,8 @@ class LoaderController < ApplicationController
     # then the current task MUST be a summary. Record its name and
     # blank out the task from the array. Otherwise, use whatever
     # summary name was most recently found (if any) as a name prefix.
-    
+
+    all_categories = []
     category = ''
     
     tasks.each_index do | index |
@@ -283,13 +314,14 @@ class LoaderController < ApplicationController
       next_task = tasks[ index + 1 ]
       
       if ( next_task and next_task.level > task.level )
-        category         = task.title
+        category         = task.title.strip.gsub(/:$/, '') # Kill any trailing :'s which are common in some project files
+        all_categories.push(category)   # Keep track of all categories so we know which ones might need to be added
         tasks[ index ] = nil
       else
         task.category = category
       end
     end
-    
+
     # Remove any 'nil' items we created above
     tasks.compact!
     tasks = tasks.uniq
@@ -339,7 +371,8 @@ class LoaderController < ApplicationController
     end
     
     real_tasks = real_tasks.uniq unless real_tasks.nil?
-    
-    return real_tasks
+    all_categories = all_categories.uniq.sort
+
+    return real_tasks, all_categories
   end
 end
