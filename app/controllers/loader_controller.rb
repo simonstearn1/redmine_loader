@@ -239,7 +239,7 @@ class LoaderController < ApplicationController
           end
         end
     
-        redirect_to( "/projects/#{@project}/issues" )
+        redirect_to( "/projects/#{@project.identifier}/issues" )
         
         
       rescue => error
