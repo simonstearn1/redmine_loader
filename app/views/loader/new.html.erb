@@ -205,7 +205,7 @@
     Alternatively, ignore the above tasks and analyse a different file:
 </p>
 <% end -%>
-<%= hidden_field_tag( "project_id", "#{@project}" ) %>
+<%= hidden_field_tag( "project_id", "#{@project.id}" ) %>
 <%= f.file_field 'xmlfile' %>
 <%= f.submit( 'Analyse', { :name => 'import[analyse]', :disable_with => 'Analysing...' } ) %>
 <% end %>
