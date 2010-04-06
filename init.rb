@@ -8,7 +8,7 @@ Redmine::Plugin.register :redmine_loader do
 
   description 'Basic project file loader'
 
-  version '0.0.9'
+  version '0.0.9b'
 
   requires_redmine :version_or_higher => '0.8.0'
 

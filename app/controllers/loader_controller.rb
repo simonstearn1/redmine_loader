@@ -50,7 +50,7 @@ class LoaderController < ApplicationController
     xmlfile = params[ :import ][ :xmlfile ]
     @import = TaskImport.new
         
-    if ( xmlfile != '' )
+    unless ( xmlfile.nil? )
 
       # The user selected a file to upload, so process it
       
@@ -361,7 +361,7 @@ class LoaderController < ApplicationController
       strs = work.scan(/.*?(\d+)H(\d+)M(\d+)S.*?/).flatten unless work.nil?
       hours, mins, secs = strs.map { | str | str.to_i } unless strs.nil?
       
-      next if ( hours == 0 and mins == 0 and secs == 0 )
+      #next if ( hours == 0 and mins == 0 and secs == 0 )
       
       # Woohoo, real task!
       
@@ -370,6 +370,7 @@ class LoaderController < ApplicationController
       real_tasks.push( task )
     end
     
+    real_tasks = tasks if real_tasks.nil?
     real_tasks = real_tasks.uniq unless real_tasks.nil?
     all_categories = all_categories.uniq.sort
 
